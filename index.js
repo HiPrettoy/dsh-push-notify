@@ -8,7 +8,7 @@ const DEFAULT_CONFIG = {
   notifyOnTurnEnd: true,
   notifyOnApproval: true,
   notifyOnQuestion: true,
-  notifyOnError: false,
+  notifyOnError: true,
   bark: {
     enabled: true,
     serverUrl: 'https://api.day.app',
@@ -80,7 +80,7 @@ export function apply(ctx, config) {
           notifyOnTurnEnd: oldData.notifyOnTurnEnd ?? true,
           notifyOnApproval: oldData.notifyOnApproval ?? true,
           notifyOnQuestion: oldData.notifyOnQuestion ?? true,
-          notifyOnError: oldData.notifyOnError ?? false,
+          notifyOnError: oldData.notifyOnError ?? true,
           bark: {
             ...DEFAULT_CONFIG.bark,
             enabled: !!oldData.deviceKey,
@@ -204,7 +204,6 @@ export function apply(ctx, config) {
 
   // 统一分发消息到已启用的渠道
   const dispatchNotification = (notification) => {
-    // 异步触发推送，不阻塞主流程
     Promise.resolve().then(async () => {
       try {
         const { title, body, extraUrl, priority = 'default', tags = ['bell'] } = notification;
@@ -299,7 +298,6 @@ export function apply(ctx, config) {
   });
 
   // 2. 工具执行拦截：当触发 ask_user_question 时立即发送通知
-  // ask_user_question 无论 timed 还是 legacy 模式，都会经过 tools/execute
   ctx.on('tools/execute', (exec, next) => {
     if (activeConfig.notifyOnQuestion && exec?.name === 'ask_user_question') {
       try {
@@ -336,7 +334,7 @@ export function apply(ctx, config) {
     return next();
   });
 
-  // 3. 对话回合结束 (Serial)
+  // 3. 对话回合正常结束 (Serial)
   ctx.on('agent/turn-stopping', (payload) => {
     if (activeConfig.notifyOnTurnEnd) {
       const turnNum = payload?.turn !== undefined ? ` (第 ${payload.turn} 轮)` : '';
@@ -346,7 +344,59 @@ export function apply(ctx, config) {
     }
   });
 
-  // 4. 运行错误 (Emit)
+  // 4. 监听底层会话流：全面捕获异常停止（额度耗尽 QUOTA、中断 INTERRUPTED、任务失败等）
+  ctx.on('session/event', (_session, event) => {
+    if (!activeConfig.notifyOnError && !activeConfig.notifyOnTurnEnd) return;
+    if (event?.type !== 'turn/end') return;
+
+    const reason = event.data?.reason;
+    if (!reason) return;
+
+    const turn = event.data?.turn;
+    const turnText = turn !== undefined ? ` (第 ${turn} 轮)` : '';
+
+    // 4.1 运行错误（例如：额度用尽 QUOTA、模型请求报错等）
+    if (reason.kind === 'error') {
+      if (!activeConfig.notifyOnError) return;
+      const err = reason.error || {};
+      const code = err.code || '';
+      let errMsg = err.message || '';
+
+      if (code === 'QUOTA' || code === 'ACCOUNT_QUOTA' || errMsg.includes('额度已用尽')) {
+        errMsg = '当前请求的额度已用尽 (QUOTA)，任务已中止。请检查账号余额或充值。';
+      }
+
+      const title = '❌ DSH: 本轮运行失败';
+      const body = `本轮对话${turnText}因异常停止：\n${errMsg}${code ? `\n[错误码: ${code}]` : ''}`;
+      dispatchNotification({ title, body, priority: 'urgent', tags: ['x', 'warning', 'money_with_wings'] });
+      return;
+    }
+
+    // 4.2 用户主动终止或被信号中断
+    if (reason.kind === 'aborted' || reason.kind === 'interrupted') {
+      if (!activeConfig.notifyOnError) return;
+      let abortDesc = '任务被中断或终止';
+      if (reason.reason?.kind === 'hook' && reason.reason?.reason === 'deepseek-account/signed-out') {
+        abortDesc = '因账号退出登录，任务已停止。';
+      } else if (reason.kind === 'interrupted') {
+        abortDesc = 'DSH 进程在任务完成前退出。';
+      }
+      const title = '⏹️ DSH: 任务已终止';
+      const body = `本轮对话${turnText}${abortDesc}`;
+      dispatchNotification({ title, body, priority: 'high', tags: ['stop_button', 'warning'] });
+      return;
+    }
+
+    // 4.3 达到 Token 最大上限限制截断
+    if (reason.kind === 'max-tokens') {
+      if (!activeConfig.notifyOnTurnEnd) return;
+      const title = '⚠️ DSH: 已达到最大 Token 限制';
+      const body = `本轮对话${turnText}输出达到了上下文 Token 上限，已截断停止。`;
+      dispatchNotification({ title, body, priority: 'high', tags: ['warning'] });
+    }
+  }, { global: true });
+
+  // 5. Agent 错误兜底
   ctx.on('agent/error', (payload) => {
     if (activeConfig.notifyOnError) {
       const errorMsg = payload?.error?.message || String(payload?.error || '未知异常');
