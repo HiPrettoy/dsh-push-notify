@@ -22,6 +22,18 @@
   "bugs": {
     "url": "https://github.com/faruzanCN/dsh-push-notify/issues"
   },
+  "engines": {
+    "dsh": ">=0.1.0-rc.1 <1.0.0 || >=0.2.0-rc.1 <1.0.0",
+    "node": ">=20.0.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh": ">=0.1.0-rc.1 <1.0.0 || >=0.2.0-rc.1 <1.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh": {
+      "optional": true
+    }
+  },
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
