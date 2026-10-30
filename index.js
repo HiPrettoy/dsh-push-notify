@@ -285,7 +285,7 @@ export function apply(ctx, config) {
     };
   }, 'dsh-push-notify: HTTP API routes');
 
-  // 1. 等待操作授权/批准 (Waterfall)
+  // 1. 等待操作授权/批准 (Waterfall 拦截)
   ctx.on('approval/request', (req, next) => {
     if (activeConfig.notifyOnApproval) {
       const toolName = req.toolName || '工具';
@@ -344,55 +344,69 @@ export function apply(ctx, config) {
     }
   });
 
-  // 4. 监听底层会话流：全面捕获异常停止（额度耗尽 QUOTA、中断 INTERRUPTED、任务失败等）
+  // 4. 监听底层会话流（全局）：捕获权限请求 approval/asked 以及回合异常结束
   ctx.on('session/event', (_session, event) => {
-    if (!activeConfig.notifyOnError && !activeConfig.notifyOnTurnEnd) return;
-    if (event?.type !== 'turn/end') return;
+    if (!event?.type) return;
 
-    const reason = event.data?.reason;
-    if (!reason) return;
-
-    const turn = event.data?.turn;
-    const turnText = turn !== undefined ? ` (第 ${turn} 轮)` : '';
-
-    // 4.1 运行错误（例如：额度用尽 QUOTA、模型请求报错等）
-    if (reason.kind === 'error') {
-      if (!activeConfig.notifyOnError) return;
-      const err = reason.error || {};
-      const code = err.code || '';
-      let errMsg = err.message || '';
-
-      if (code === 'QUOTA' || code === 'ACCOUNT_QUOTA' || errMsg.includes('额度已用尽')) {
-        errMsg = '当前请求的额度已用尽 (QUOTA)，任务已中止。请检查账号余额或充值。';
-      }
-
-      const title = '❌ DSH: 本轮运行失败';
-      const body = `本轮对话${turnText}因异常停止：\n${errMsg}${code ? `\n[错误码: ${code}]` : ''}`;
-      dispatchNotification({ title, body, priority: 'urgent', tags: ['x', 'warning', 'money_with_wings'] });
+    // 4.1 权限授权请求：在核心 session.append('approval/asked') 时立即推送
+    if (event.type === 'approval/asked') {
+      if (!activeConfig.notifyOnApproval) return;
+      const toolName = event.data?.toolName || '工具';
+      const reason = event.data?.reason || '需要执行操作授权';
+      const title = '⚠️ DSH: 等待权限批准';
+      const body = `工具 [${toolName}] 请求执行权限：\n${reason}`;
+      dispatchNotification({ title, body, priority: 'high', tags: ['warning', 'lock'] });
       return;
     }
 
-    // 4.2 用户主动终止或被信号中断
-    if (reason.kind === 'aborted' || reason.kind === 'interrupted') {
-      if (!activeConfig.notifyOnError) return;
-      let abortDesc = '任务被中断或终止';
-      if (reason.reason?.kind === 'hook' && reason.reason?.reason === 'deepseek-account/signed-out') {
-        abortDesc = '因账号退出登录，任务已停止。';
-      } else if (reason.kind === 'interrupted') {
-        abortDesc = 'DSH 进程在任务完成前退出。';
-      }
-      const title = '⏹️ DSH: 任务已终止';
-      const body = `本轮对话${turnText}${abortDesc}`;
-      dispatchNotification({ title, body, priority: 'high', tags: ['stop_button', 'warning'] });
-      return;
-    }
+    // 4.2 回合结束处理
+    if (event.type === 'turn/end') {
+      if (!activeConfig.notifyOnError && !activeConfig.notifyOnTurnEnd) return;
+      const reason = event.data?.reason;
+      if (!reason) return;
 
-    // 4.3 达到 Token 最大上限限制截断
-    if (reason.kind === 'max-tokens') {
-      if (!activeConfig.notifyOnTurnEnd) return;
-      const title = '⚠️ DSH: 已达到最大 Token 限制';
-      const body = `本轮对话${turnText}输出达到了上下文 Token 上限，已截断停止。`;
-      dispatchNotification({ title, body, priority: 'high', tags: ['warning'] });
+      const turn = event.data?.turn;
+      const turnText = turn !== undefined ? ` (第 ${turn} 轮)` : '';
+
+      // 运行错误（例如：额度用尽 QUOTA、模型请求报错等）
+      if (reason.kind === 'error') {
+        if (!activeConfig.notifyOnError) return;
+        const err = reason.error || {};
+        const code = err.code || '';
+        let errMsg = err.message || '';
+
+        if (code === 'QUOTA' || code === 'ACCOUNT_QUOTA' || errMsg.includes('额度已用尽')) {
+          errMsg = '当前请求的额度已用尽 (QUOTA)，任务已中止。请检查账号余额或充值。';
+        }
+
+        const title = '❌ DSH: 本轮运行失败';
+        const body = `本轮对话${turnText}因异常停止：\n${errMsg}${code ? `\n[错误码: ${code}]` : ''}`;
+        dispatchNotification({ title, body, priority: 'urgent', tags: ['x', 'warning', 'money_with_wings'] });
+        return;
+      }
+
+      // 用户主动终止或被信号中断
+      if (reason.kind === 'aborted' || reason.kind === 'interrupted') {
+        if (!activeConfig.notifyOnError) return;
+        let abortDesc = '任务被中断或终止';
+        if (reason.reason?.kind === 'hook' && reason.reason?.reason === 'deepseek-account/signed-out') {
+          abortDesc = '因账号退出登录，任务已停止。';
+        } else if (reason.kind === 'interrupted') {
+          abortDesc = 'DSH 进程在任务完成前退出。';
+        }
+        const title = '⏹️ DSH: 任务已终止';
+        const body = `本轮对话${turnText}${abortDesc}`;
+        dispatchNotification({ title, body, priority: 'high', tags: ['stop_button', 'warning'] });
+        return;
+      }
+
+      // 达到 Token 最大上限限制截断
+      if (reason.kind === 'max-tokens') {
+        if (!activeConfig.notifyOnTurnEnd) return;
+        const title = '⚠️ DSH: 已达到最大 Token 限制';
+        const body = `本轮对话${turnText}输出达到了上下文 Token 上限，已截断停止。`;
+        dispatchNotification({ title, body, priority: 'high', tags: ['warning'] });
+      }
     }
   }, { global: true });
 
