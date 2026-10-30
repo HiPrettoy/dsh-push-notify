@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build and package output
+*.tgz
+*.tar.gz
+dist/
+
+# Runtime config & state (Do not commit sensitive tokens/keys)
+push-notify-config.json
+bark-config.json
+*.local.json
+.dsh/
+
+# Environment variables
+.env
+.env.*
+
+# Logs
+logs/
+*.log
+
+# System files
+.DS_Store
+Thumbs.db

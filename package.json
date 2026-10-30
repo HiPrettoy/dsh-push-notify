@@ -1,0 +1,54 @@
+{
+  "name": "dsh-push-notify",
+  "version": "1.0.0",
+  "description": "Multi-channel push notification plugin for DeepSeek Harness supporting Bark (iOS) and ntfy (Android/iOS/Web).",
+  "main": "./index.js",
+  "type": "module",
+  "keywords": [
+    "deepseek-harness",
+    "dsh-plugin",
+    "cordis",
+    "bark",
+    "ntfy",
+    "push-notification"
+  ],
+  "author": "faruzanCN",
+  "license": "MIT",
+  "homepage": "https://github.com/faruzanCN/dsh-push-notify#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/faruzanCN/dsh-push-notify.git"
+  },
+  "bugs": {
+    "url": "https://github.com/faruzanCN/dsh-push-notify/issues"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale",
+    "icon.svg",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings-general"
+      ]
+    }
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "nav": "Push Notifications",
+  "title": "Push Notification Settings",
+  "desc": "Real-time push notifications supporting Bark (iOS) and ntfy (multi-platform)."
+}

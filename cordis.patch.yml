@@ -1,0 +1,22 @@
+- insert:
+    - id: push-notify
+      name: 'dsh-push-notify'
+      disabled: !!js "[...ctx.loader.entries()].some((e) => e.options.name === 'dsh-push-notify' && e.options.id !== 'push-notify' && !e.disabled)"
+      config:
+        webUrl: 'http://127.0.0.1:3080'
+        notifyOnTurnEnd: true
+        notifyOnApproval: true
+        notifyOnQuestion: true
+        notifyOnError: false
+        bark:
+          enabled: false
+          serverUrl: 'https://api.day.app'
+          deviceKey: ''
+          sound: 'bell'
+          group: 'DeepSeek Harness'
+        ntfy:
+          enabled: false
+          serverUrl: 'https://ntfy.sh'
+          topic: ''
+          token: ''
+          priority: 'default'
