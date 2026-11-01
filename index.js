@@ -54,8 +54,34 @@ function parseJsonBody(req) {
   });
 }
 
+/**
+ * Resolve the directory that owns this profile's on-disk state.
+ *
+ * `DSH_PROFILE_DIR` is only injected into the *model shell child process*
+ * (see `dsh-shell-env`: `values[DSH_PROFILE_DIR_KEY] = profile.dir`), so the
+ * DSH main process usually does **not** have it. Falling straight back to
+ * `process.cwd()` then writes the config into whatever directory the host
+ * happened to be launched from — on the desktop client that is the DSH
+ * installation directory itself (`<npm prefix>/node_modules/@deepseek-ai/dsh`),
+ * so the file is wiped on every upgrade.
+ *
+ * Prefer the `profileContext` service, which is the authoritative source for
+ * the active profile directory (`~/.dsh/profiles/<name>`).
+ */
+function resolveProfileDir(ctx) {
+  if (process.env.DSH_PROFILE_DIR) return process.env.DSH_PROFILE_DIR;
+  try {
+    const dir = ctx.get?.('profileContext')?.dir;
+    if (typeof dir === 'string' && dir.length > 0) return dir;
+  } catch {
+    // profileContext is optional; fall through to the remaining candidates.
+  }
+  if (process.env.DSH_HOME) return process.env.DSH_HOME;
+  return process.cwd();
+}
+
 export function apply(ctx, config) {
-  const profileDir = process.env.DSH_PROFILE_DIR || process.cwd();
+  const profileDir = resolveProfileDir(ctx);
   const configPath = join(profileDir, 'push-notify-config.json');
   const legacyBarkPath = join(profileDir, 'bark-config.json');
 
