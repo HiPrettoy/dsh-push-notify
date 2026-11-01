@@ -54,6 +54,39 @@ function parseJsonBody(req) {
   });
 }
 
+/** Config keys that carry a credential and must never travel to the browser. */
+const SECRET_FIELDS = { bark: ['deviceKey'], ntfy: ['token'] };
+
+/**
+ * Mask a secret for display. Only a configured flag and the last four
+ * characters are exposed; the raw value never leaves the Host.
+ */
+function maskSecret(value) {
+  const raw = typeof value === 'string' ? value.trim() : '';
+  if (raw.length === 0) return { configured: false, masked: '' };
+  return { configured: true, masked: `••••••••${raw.slice(-4)}` };
+}
+
+/** True when the caller bounced a masked placeholder back instead of a new value. */
+function isMaskEcho(value) {
+  return typeof value === 'string' && value.startsWith('••••••••');
+}
+
+/** Config shape that is safe to send to the browser: every secret is stripped. */
+function publicConfig(cfg) {
+  const out = { ...cfg };
+  for (const [group, fields] of Object.entries(SECRET_FIELDS)) {
+    out[group] = { ...(cfg[group] || {}) };
+    for (const field of fields) {
+      const { configured, masked } = maskSecret(out[group][field]);
+      out[group][field] = '';
+      out[group][`${field}Configured`] = configured;
+      out[group][`${field}Masked`] = masked;
+    }
+  }
+  return out;
+}
+
 export function apply(ctx, config) {
   const profileDir = process.env.DSH_PROFILE_DIR || process.cwd();
   const configPath = join(profileDir, 'push-notify-config.json');
@@ -100,12 +133,32 @@ export function apply(ctx, config) {
   let activeConfig = loadConfig();
 
   const saveConfig = (newCfg) => {
-    activeConfig = {
+    const merged = {
       ...activeConfig,
       ...newCfg,
       bark: { ...(activeConfig.bark || DEFAULT_CONFIG.bark), ...(newCfg.bark || {}) },
       ntfy: { ...(activeConfig.ntfy || DEFAULT_CONFIG.ntfy), ...(newCfg.ntfy || {}) },
     };
+    // The browser never receives secrets, so an omitted / empty / masked-back
+    // value means "leave the stored one alone" rather than "clear it". An
+    // explicit null is the only way to erase a credential.
+    for (const [group, fields] of Object.entries(SECRET_FIELDS)) {
+      if (!merged[group]) continue;
+      for (const field of fields) {
+        // <field>Configured / <field>Masked are display-only projections; drop
+        // them so a client that echoes the whole form cannot persist them.
+        delete merged[group][`${field}Configured`];
+        delete merged[group][`${field}Masked`];
+        const next = merged[group][field];
+        if (next === null) {
+          merged[group][field] = '';
+        } else if (next === undefined || isMaskEcho(next)
+            || (typeof next === 'string' && next.trim().length === 0)) {
+          merged[group][field] = activeConfig[group]?.[field] ?? '';
+        }
+      }
+    }
+    activeConfig = merged;
     try {
       writeFileSync(configPath, JSON.stringify(activeConfig, null, 2), 'utf8');
       return true;
@@ -227,14 +280,14 @@ export function apply(ctx, config) {
         path: '/dsh-push-notify/config',
         handler: async (req, res) => {
           if (req.method === 'GET') {
-            sendJson(res, 200, { ok: true, config: activeConfig });
+            sendJson(res, 200, { ok: true, config: publicConfig(activeConfig) });
             return;
           }
           if (req.method === 'POST') {
             try {
               const body = await parseJsonBody(req);
               const ok = saveConfig(body);
-              sendJson(res, 200, { ok, config: activeConfig });
+              sendJson(res, 200, { ok, config: publicConfig(activeConfig) });
             } catch (err) {
               sendJson(res, 400, { ok: false, error: err?.message || 'invalid payload' });
             }

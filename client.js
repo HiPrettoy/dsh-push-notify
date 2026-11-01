@@ -380,6 +380,14 @@ window.__ModuleLoader__.load({
           });
           const data = await res.json();
           if (data && data.ok) {
+            // POST answers with the masked view, so merging it drops the
+            // plaintext the user just typed and refreshes the "configured" hint.
+            setForm((prev) => ({
+              ...prev,
+              ...(data.config || {}),
+              bark: { ...prev.bark, ...(data.config?.bark || {}) },
+              ntfy: { ...prev.ntfy, ...(data.config?.ntfy || {}) },
+            }));
             showMessage({ type: 'success', text: '✅ 通知配置已成功保存并即时生效！' });
           } else {
             showMessage({ type: 'error', text: '❌ 保存失败: ' + (data?.error || '未知错误') });
@@ -500,11 +508,16 @@ window.__ModuleLoader__.load({
               h('label', { className: 'push-label' }, 'Bark Device Key'),
               h('input', {
                 className: 'push-input',
-                type: 'text',
+                type: 'password',
                 value: form.bark.deviceKey,
-                placeholder: '手机 Bark App 首页获取的设备 Key',
+                placeholder: form.bark.deviceKeyConfigured
+                  ? `已配置 ${form.bark.deviceKeyMasked}，留空则不修改`
+                  : '手机 Bark App 首页获取的设备 Key',
                 onChange: (e) => updateBark('deviceKey', e.target.value),
-              })
+              }),
+              form.bark.deviceKeyConfigured
+                ? h('span', { className: 'push-hint' }, '已保存的 Key 不会回显；如需更换请直接输入新的 Key')
+                : null
             ),
 
             h('div', { className: 'push-field' },
@@ -575,7 +588,9 @@ window.__ModuleLoader__.load({
                 className: 'push-input',
                 type: 'password',
                 value: form.ntfy.token,
-                placeholder: '若 Topic 设有写入鉴权权限，请填入 Token',
+                placeholder: form.ntfy.tokenConfigured
+                  ? `已配置 ${form.ntfy.tokenMasked}，留空则不修改`
+                  : '若 Topic 设有写入鉴权权限，请填入 Token',
                 onChange: (e) => updateNtfy('token', e.target.value),
               }),
               h('span', { className: 'push-hint' }, '公开公共 Topic 留空即可')
@@ -671,7 +686,7 @@ window.__ModuleLoader__.load({
           form.bark.enabled && h('button', {
             className: 'push-btn push-btn-secondary',
             onClick: () => handleTest('bark'),
-            disabled: saving || testingChannel !== null || !form.bark.deviceKey,
+            disabled: saving || testingChannel !== null || (!form.bark.deviceKey && !form.bark.deviceKeyConfigured),
           }, testingChannel === 'bark' ? '正在测试 Bark...' : '测试 Bark 推送'),
 
           form.ntfy.enabled && h('button', {
